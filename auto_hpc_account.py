@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from email.header import Header
+from email.utils import formatdate
 
 
 # ====== Setup Logging ======
@@ -44,8 +46,13 @@ logger = setup_logging()
 
 # ====== Load Environment Variables ======
 load_dotenv()
+env = load_dotenv()
 
-SMTP_SERVER = os.getenv("SMTP_SERVER")
+# Gmail configuration (primary)
+CC_ADDRESSES = ["ntueehpc@googlegroups.com"]  # CC addresses for all emails
+
+# Legacy SMTP configuration (fallback)
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
@@ -236,10 +243,16 @@ def send_email(recipient, username, password, name="User"):
             logger.error(f"Invalid SMTP_USER email address: {SMTP_USER}")
             return False
         
+        if not SMTP_PASS:
+            logger.error("SMTP_PASS not configured")
+            return False
+        
         msg = MIMEMultipart()
-        msg["From"] = f"HPC Admin <{SMTP_USER}>"  # Properly formatted From header
+        msg["From"] = SMTP_USER
         msg["To"] = recipient
-        msg["Subject"] = "HPC 帳號建立通知 / HPC Account Created"
+        msg["Cc"] = ", ".join(CC_ADDRESSES)  # Add CC header
+        msg["Subject"] = str(Header("HPC 帳號建立通知 / HPC Account Created", "utf-8"))
+        msg["Date"] = formatdate(localtime=True)
         
         # Bilingual email body (Chinese + English)
         body = f"""您好 {name}，
@@ -311,6 +324,9 @@ HPC System Administration Team
                 msg.attach(pdf2)
             logger.debug(f"Attached second PDF guide: {PDF_GUIDE_PATH_2}")
         
+        # Include CC addresses in recipients list
+        recipients = [recipient] + CC_ADDRESSES
+        
         # Send email via SMTP
         logger.info(f"Connecting to SMTP server {SMTP_SERVER}:{SMTP_PORT}")
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30) as smtp:
@@ -320,13 +336,13 @@ HPC System Administration Team
             logger.debug("Logging in...")
             smtp.login(SMTP_USER, SMTP_PASS)
             logger.debug("Sending message...")
-            smtp.send_message(msg)
+            smtp.sendmail(SMTP_USER, recipients, msg.as_string())  # Send to TO + CC
         
-        logger.info(f"📧 Successfully sent email to {recipient}")
+        logger.info(f"📧 Successfully sent email to {recipient} (CC: {', '.join(CC_ADDRESSES)})")
         return True
         
     except smtplib.SMTPAuthenticationError:
-        logger.error("SMTP authentication failed. Check email credentials.")
+        logger.error("SMTP authentication failed. Check SMTP_USER and SMTP_PASS (use App Password for Gmail).")
         return False
     except smtplib.SMTPException as e:
         logger.error(f"SMTP error: {e}")
